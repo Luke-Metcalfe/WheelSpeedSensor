@@ -40,8 +40,6 @@ Wheel RL = Wheel(pin0, pin17, 189.0);
 Wheel RR = Wheel(pin2, pin18, 190.0);
 Wheel wheelArray[4] = { FL, FR, RL, RR };
 
-long int loopStart = millis();
-float currentSpeed = 50.0;
 
 void setup() {
   Serial.begin(115200);
@@ -57,11 +55,6 @@ void setup() {
   gpio_config(&io_conf);
 
   long int timeStart = micros();
-
-  FL.setStart(timeStart);
-  FR.setStart(timeStart);
-  RL.setStart(timeStart);
-  RR.setStart(timeStart);
 
   FL.setNextTransition(timeStart);
   FR.setNextTransition(timeStart);
@@ -132,7 +125,7 @@ void newTransition(Wheel& w) {
             w.transmissionHalf = 100;
             w.currentDataBit = 100;
 
-          } else if (data[w.currentDataBit] ^ data[w.currentDataBit + 1]) {  // xor: if current bit diff to next, next transition occurs later.
+          } else if (w.serialData[w.currentDataBit] ^ w.serialData[w.currentDataBit + 1]) {  // xor: if current bit diff to next, next transition occurs later.
             w.nextTransition += 50;
             w.transmissionHalf = 2;  // skip ahead to 2nd half transition of next bit, 50us later
 
@@ -167,7 +160,7 @@ void newTransition(Wheel& w) {
 }
 
 void firstHalfTransition(Wheel& w) {
-  switch (data[w.currentDataBit]) {
+  switch (w.serialData[w.currentDataBit]) {
     case 1:
       GPIO.out_w1tc = w.getPin2();  // clear
       break;
@@ -179,7 +172,7 @@ void firstHalfTransition(Wheel& w) {
 }
 
 void secondHalfTransition(Wheel& w) {
-  switch (data[w.currentDataBit]) {
+  switch (w.serialData[w.currentDataBit]) {
     case 1:
       GPIO.out_w1ts = w.getPin2();  // set
       break;
