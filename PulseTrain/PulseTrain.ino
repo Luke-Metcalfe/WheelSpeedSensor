@@ -55,7 +55,6 @@ void setup() {
   gpio_config(&io_conf);
 
   long int timeStart = micros();
-
   FL.setNextTransition(timeStart);
   FR.setNextTransition(timeStart);
   RL.setNextTransition(timeStart);

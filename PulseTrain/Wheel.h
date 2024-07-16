@@ -30,8 +30,10 @@ public:
   void setZone(int newZone);
   void setCurrentDataBit(int newBit);
   void setTransmissionHalf(int newHalf);
+  void setData(int index, int value);
   void setAvailDataBits(int newAvailBits);
   void calcDataBits();
+  void calcParity();
 
   long int nextTransition;
   

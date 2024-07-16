@@ -12,6 +12,7 @@ Wheel::Wheel(unsigned long pin1, unsigned long pin2, float speed) {
   period = 1.0 / (speed * teeth / wheelCirc * (1000.0 / 3.6)) * 1000000;
   freq = speed * teeth / wheelCirc * (1000.0 / 3.6);
   this->calcDataBits();
+  this->calcParity();
 
   // Initialise Transmission States
   zone = 0;
@@ -59,13 +60,13 @@ int Wheel::getAvailDataBits() {
   return availDataBits;
 }
 
-
 // Setters
 void Wheel::setSpeed(float newSpeed) {
   speed = newSpeed;
   period = 1.0 / (speed * teeth / wheelCirc * (1000.0 / 3.6)) * 1000000;
   freq = speed * teeth / wheelCirc * (1000.0 / 3.6);
   this->calcDataBits();
+  this->calcParity();
 }
 
 void Wheel::setNextTransition(long int newTransition) {
@@ -92,6 +93,11 @@ void Wheel::setAvailDataBits(int newAvailBits) {
   availDataBits = newAvailBits;
 }
 
+void Wheel::setData(int index, int value){
+  serialData[index] = value;
+  this->calcParity();
+}
+
 void Wheel::calcDataBits() {
   if (period >= 1050) {
     availDataBits = 9;
@@ -108,4 +114,12 @@ void Wheel::calcDataBits() {
   } else if ((period < 550)) {
     availDataBits = 3;
   }
+}
+
+void Wheel::calcParity(){
+  int sum = 0;
+  for (int i=0; i<8;i++){ // add bits, determine parity
+    sum += serialData[i];
+  }
+  serialData[8] = sum % 2; // even parity
 }
