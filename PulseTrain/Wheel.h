@@ -17,30 +17,34 @@ public:
   long int getStart();
   long int getDelta();
 
-  /*
+
   long int getNextTransition();
   int getZone();
   int getCurrentDataBit();
   int getTransmissionHalf();
   int getAvailDataBits();
-  */
+
   
   // Setters
   void setSpeed(float newSpeed);
   void setDelta(long int newDelta);
   void setStart(long int newStart);
-  void setZone(int newZone);
   void calcDataBits();
 
-  /*
+  void setNextTransition(long int newTransition);
+
   void incrNextTransition(long int newTransition);
   void setZone(int newZone);
   void setCurrentDataBit(int newBit);
   void setTransmissionHalf(int newHalf);
   void setAvailDataBits(int newAvailBits);
-  */
 
+
+
+
+  long int start;
   long int nextTransition;
+  
   int zone; // 0 in pulse, 1 in pause 1, 2 in data transmission, 3 in pause 2, 100 when resting
   int currentDataBit; // 100 not in data transmission, 0-9 when in data
   int transmissionHalf; // 100 not in data transmission, 1 first half, 2 second half
@@ -56,9 +60,7 @@ private:
 
   long int period;
   long int freq; 
-  long int start;
-  long int delta;
-  
+  //long int start;
 
 
   float teeth = 48.0;
