@@ -66,10 +66,9 @@ void loop() {
 }
 
 void checkTransitions() {
-  long int currentTime = micros();
   for (int i = 0; i < 4; i++) {
     Wheel& w = wheelArray[i];
-    if (currentTime >= w.nextTransition) {  // current time exceeds next transition time
+    if (micros() >= w.nextTransition) {  // current time exceeds next transition time
       newTransition(w);
     }
   }
@@ -81,9 +80,6 @@ void newTransition(Wheel& w) {
 
     case 0:                                       // Large Pulse
       GPIO.out_w1ts = w.getPin1() | w.getPin2();  // set
-
-      //w.start = w.nextTransition;  // NEW CHANGE - save start of pulse
-
       w.nextTransition += 50;
       w.zone = 1;
       break;

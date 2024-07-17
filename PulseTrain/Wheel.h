@@ -12,8 +12,8 @@ public:
   unsigned long getPin2();
   
   float getSpeed();
-  long int getPeriod();
-  long int getFrequency();
+  float getPeriod();
+  float getFrequency();
 
   long int getNextTransition();
   int getZone();
@@ -21,10 +21,11 @@ public:
   int getTransmissionHalf();
   int getAvailDataBits();
 
-  
   // Setters
   void setSpeed(float newSpeed);
-  void setDelta(long int newDelta);
+  void setFrequency(float newFreq);
+  void setPeriod(float newPeriod);
+
   void setNextTransition(long int newTransition);
   void incrNextTransition(long int newTransition);
   void setZone(int newZone);
@@ -50,8 +51,8 @@ private:
   unsigned long pin2; 
   float speed;
 
-  long int period;
-  long int freq;
+  float period;
+  float freq;
 
   float teeth = 48.0;
   float wheelCirc = 1950.0;

@@ -32,11 +32,11 @@ float Wheel::getSpeed() {
   return speed;
 }
 
-long int Wheel::getPeriod() {
+float Wheel::getPeriod() {
   return period;
 }
 
-long int Wheel::getFrequency() {
+float Wheel::getFrequency() {
   return freq;
 }
 
@@ -69,6 +69,24 @@ void Wheel::setSpeed(float newSpeed) {
   this->calcParity();
 }
 
+void Wheel::setFrequency(float newFreq) {
+  freq = newFreq;
+  period = 1.0 / freq;
+  speed = freq / (teeth / wheelCirc * (1000.0 / 3.6));
+  this->calcDataBits();
+  this->calcParity();
+}
+
+void Wheel::setPeriod(float newPeriod) {
+  period = newPeriod;
+  freq = 1.0 / period;
+  speed = freq / (teeth / wheelCirc * (1000.0 / 3.6));
+  this->calcDataBits();
+  this->calcParity();
+}
+
+
+
 void Wheel::setNextTransition(long int newTransition) {
   nextTransition = newTransition;
 }
@@ -89,7 +107,7 @@ void Wheel::setTransmissionHalf(int newHalf) {
   transmissionHalf = newHalf;
 }
 
-void Wheel::setAvailDataBits(int newAvailBits) {
+void Wheel::setAvailDataBits(int newAvailBits) {  // REMOVE?
   availDataBits = newAvailBits;
 }
 
