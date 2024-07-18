@@ -6,15 +6,10 @@
 Wheel::Wheel(unsigned long pin1, unsigned long pin2, float speed) {
   this->pin1 = pin1;
   this->pin2 = pin2;
-  this->speed = speed;
-
-  // Calculate Related Variables
-  period = 1.0 / (speed * teeth / wheelCirc * (1000.0 / 3.6)) * 1000000;
-  freq = speed * teeth / wheelCirc * (1000.0 / 3.6);
-  this->calcDataBits();
-  this->calcParity();
+  this->setSpeed(speed);
 
   // Initialise Transmission States
+  nextTransition = 0;
   zone = 0;
   currentDataBit = 100;
   transmissionHalf = 100;
@@ -60,26 +55,37 @@ int Wheel::getAvailDataBits() {
   return availDataBits;
 }
 
+int Wheel::getSerialData(int bit) {
+  return serialData[bit];
+}
+
 // Setters
-void Wheel::setSpeed(float newSpeed) {
+void Wheel::setSpeed(float newSpeed) { // km/h
   speed = newSpeed;
-  period = 1.0 / (speed * teeth / wheelCirc * (1000.0 / 3.6)) * 1000000;
-  freq = speed * teeth / wheelCirc * (1000.0 / 3.6);
+
+  if (newSpeed == 0.0){
+    period = 1500.0*2;
+    freq = 1.0 / period * 1000000.0;
+  }
+  else{
+    period = 1.0 / (speed * teeth / wheelCirc * (1000.0 / 3.6)) * 1000000.0;
+    freq = speed * teeth / wheelCirc * (1000.0 / 3.6);
+  }
   this->calcDataBits();
   this->calcParity();
 }
 
-void Wheel::setFrequency(float newFreq) {
+void Wheel::setFrequency(float newFreq) { // Hz
   freq = newFreq;
-  period = 1.0 / freq;
+  period = 1.0 / freq * 1000000.0;
   speed = freq / (teeth / wheelCirc * (1000.0 / 3.6));
   this->calcDataBits();
   this->calcParity();
 }
 
-void Wheel::setPeriod(float newPeriod) {
+void Wheel::setPeriod(float newPeriod) { // us
   period = newPeriod;
-  freq = 1.0 / period;
+  freq = 1.0 / period * 1000000.0;
   speed = freq / (teeth / wheelCirc * (1000.0 / 3.6));
   this->calcDataBits();
   this->calcParity();

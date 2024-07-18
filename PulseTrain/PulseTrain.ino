@@ -34,11 +34,14 @@ char data[9] = { LR, M, DE, GDR, DR, LM0, LM1, LM2, P };
 float teeth = 48.0;
 float wheelCirc = 1950.0;
 
-Wheel FL = Wheel(pin4, pin15, 190.0);
-Wheel FR = Wheel(pin5, pin19, 191.0);
-Wheel RL = Wheel(pin0, pin17, 189.0);
-Wheel RR = Wheel(pin2, pin18, 190.0);
-Wheel wheelArray[4] = { FL, FR, RL, RR };
+Wheel wheelArray[4] = { 
+
+  Wheel(pin4, pin15, 190.0),  // FL
+  Wheel(pin5, pin19, 191.1),  // FR
+  Wheel(pin0, pin17, 192.2),  // RL
+  Wheel(pin2, pin18, 193.3) // RR
+
+};
 
 
 void setup() {
@@ -53,12 +56,6 @@ void setup() {
   io_conf.pin_bit_mask = pin4 | pin5 | pin0 | pin2 | pin15 | pin19 | pin17 | pin18;
   //Set BitMask
   gpio_config(&io_conf);
-
-  long int timeStart = micros();
-  FL.setNextTransition(timeStart);
-  FR.setNextTransition(timeStart);
-  RL.setNextTransition(timeStart);
-  RR.setNextTransition(timeStart);
 }
 
 void loop() {
@@ -67,8 +64,8 @@ void loop() {
 
 void checkTransitions() {
   for (int i = 0; i < 4; i++) {
-    Wheel& w = wheelArray[i];
-    if (micros() >= w.nextTransition) {  // current time exceeds next transition time
+    Wheel &w = wheelArray[i];
+    if (micros() >= w.getNextTransition()) {  // current time exceeds next transition time
       newTransition(w);
     }
   }
@@ -76,78 +73,80 @@ void checkTransitions() {
 
 void newTransition(Wheel& w) {
 
-  switch (w.zone) {
+  switch (w.getZone()) {
 
     case 0:                                       // Large Pulse
-      GPIO.out_w1ts = w.getPin1() | w.getPin2();  // set
-      w.nextTransition += 50;
-      w.zone = 1;
+      if (w.getSpeed() == 0.0){
+        GPIO.out_w1ts = w.getPin2();  // set
+      }
+      else {
+        GPIO.out_w1ts = w.getPin1() | w.getPin2();  // set
+      }
+      w.incrNextTransition(50);
+      w.setZone(1);
       break;
 
     case 1:                                       // Pause 1
       GPIO.out_w1tc = w.getPin1() | w.getPin2();  // clear
-      w.nextTransition += 25;
+      w.incrNextTransition(25);
 
       // Entering data transmission
-      w.zone = 2;
-      w.transmissionHalf = 1;
-      w.currentDataBit = 0;
+      w.setZone(2);
+      w.setTransmissionHalf(1);
+      w.setCurrentDataBit(0);
       break;
 
     case 2:  // Data Transmission
 
-      switch (w.transmissionHalf) {
+      switch (w.getTransmissionHalf()) {
         case 1:
           firstHalfTransition(w);
-          w.nextTransition += 25;
-          w.transmissionHalf = 2;
+          w.incrNextTransition(25);
+          w.setTransmissionHalf(2);
           break;
 
         case 2:
           secondHalfTransition(w);
 
-          if (w.currentDataBit >= w.availDataBits - 1) {  // last data bit, short transition time
-            w.nextTransition += 25;
+          if (w.getCurrentDataBit() >= w.getAvailDataBits() - 1) {  // last data bit, short transition time
+            w.incrNextTransition(25);
 
             // exit data transmission
-            if (w.availDataBits < 9) {
+            if (w.getAvailDataBits() < 9) {
               GPIO.out_w1tc = w.getPin2();
-              w.zone = 100;  // skip zone 3, no pause 2
+              w.setZone(100);  // skip zone 3, no pause 2
             } else {
-
-              w.zone = 3;  // add pause 2
+              w.setZone(3);  // add pause 2
             }
-            w.transmissionHalf = 100;
-            w.currentDataBit = 100;
+            w.setTransmissionHalf(100);
+            w.setCurrentDataBit(100);
 
-          } else if (w.serialData[w.currentDataBit] ^ w.serialData[w.currentDataBit + 1]) {  // xor: if current bit diff to next, next transition occurs later.
-            w.nextTransition += 50;
-            w.transmissionHalf = 2;  // skip ahead to 2nd half transition of next bit, 50us later
+          } else if (w.getSerialData(w.getCurrentDataBit()) ^ w.getSerialData(w.getCurrentDataBit() + 1)) {  // xor: if current bit diff to next, next transition occurs later.
+            w.incrNextTransition(50);
+            w.setTransmissionHalf(2); // skip ahead to 2nd half transition of next bit, 50us later
 
           } else {  // adjacent bits have same value, short transition
-            w.nextTransition += 25;
-            w.transmissionHalf = 1;  // move to 1st half of next bit, 25us later.
+            w.incrNextTransition(25);
+            w.setTransmissionHalf(1); // move to 1st half of next bit, 25us later.
           }
 
-          w.currentDataBit += 1;  // move to next data bit
-          //w.transmissionHalf = 1;  // in first half of next bit.
+          w.setCurrentDataBit(w.getCurrentDataBit() + 1);  // move to next data bit
           break;
       }
       break;
 
     case 3:  // Pause 2
       GPIO.out_w1tc = w.getPin2();
-      w.nextTransition += 25;
-      w.zone = 100;
+      w.incrNextTransition(25);
+      w.setZone(100);
       break;
 
     case 100:  // Transition out of NULL zone
-      w.zone = 0;
+      w.setZone(0);
+      w.incrNextTransition( w.getPeriod() / 2 - (w.getAvailDataBits() * Tp + (1.5 * Tp)) ); // remaining time in period, after pulse, pause, and transmission of available bits
 
-      w.nextTransition += (w.getPeriod() / 2 - (w.getAvailDataBits() * Tp + (1.5 * Tp)));  // remaining time in period, after pulse, pause, and transmission of available bits
-
-      if (w.availDataBits >= 9) {    // NB!! Investigate this
-        w.nextTransition += Tp / 2;  // add pause 2 if wheel period is large enough (all bits are available)
+      if (w.getAvailDataBits() >= 9) {    // NB!! Investigate this
+        w.incrNextTransition(Tp / 2); // add pause 2 if wheel period is large enough (all bits are available)
       }
 
       break;
@@ -155,7 +154,7 @@ void newTransition(Wheel& w) {
 }
 
 void firstHalfTransition(Wheel& w) {
-  switch (w.serialData[w.currentDataBit]) {
+  switch (w.getSerialData(w.getCurrentDataBit())) {
     case 1:
       GPIO.out_w1tc = w.getPin2();  // clear
       break;
@@ -167,7 +166,7 @@ void firstHalfTransition(Wheel& w) {
 }
 
 void secondHalfTransition(Wheel& w) {
-  switch (w.serialData[w.currentDataBit]) {
+  switch (w.getSerialData(w.getCurrentDataBit())) {
     case 1:
       GPIO.out_w1ts = w.getPin2();  // set
       break;
