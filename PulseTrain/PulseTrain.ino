@@ -3,11 +3,10 @@
 #include <cstdint>
 #include <cstddef>
 #include "Wheel.h"
-//#include "Wheel.cpp"
 
-
-const unsigned long pin0 = 1ul << 0;
-const unsigned long pin1 = 1ul << 1;
+// Bit masks for setting/clearing GPIO register
+const unsigned long pin0 = 1ul << 0;  // ...00001
+const unsigned long pin1 = 1ul << 1;  // ...00010
 const unsigned long pin2 = 1ul << 2;
 const unsigned long pin4 = 1ul << 4;
 const unsigned long pin5 = 1ul << 5;
@@ -16,20 +15,8 @@ const unsigned long pin17 = 1ul << 17;
 const unsigned long pin18 = 1ul << 18;
 const unsigned long pin19 = 1ul << 19;
 
-// Generate pulse train based on number of data bits.
+// Sensor pulse width
 int Tp = 50;  // microseconds
-
-char LR = 1;
-char M = 1;
-char DE = 0;  //
-char GDR = 1;
-char DR = 1;
-char LM0 = 0;  //
-char LM1 = 1;
-char LM2 = 0;  //
-char P = 1;
-
-char data[9] = { LR, M, DE, GDR, DR, LM0, LM1, LM2, P };
 
 float teeth = 48.0;
 float wheelCirc = 1950.0;
@@ -82,13 +69,13 @@ void newTransition(Wheel& w) {
       else {
         GPIO.out_w1ts = w.getPin1() | w.getPin2();  // set
       }
-      w.incrNextTransition(50);
+      w.incrNextTransition(Tp);
       w.setZone(1);
       break;
 
     case 1:                                       // Pause 1
       GPIO.out_w1tc = w.getPin1() | w.getPin2();  // clear
-      w.incrNextTransition(25);
+      w.incrNextTransition(Tp/2);
 
       // Entering data transmission
       w.setZone(2);
@@ -101,7 +88,7 @@ void newTransition(Wheel& w) {
       switch (w.getTransmissionHalf()) {
         case 1:
           firstHalfTransition(w);
-          w.incrNextTransition(25);
+          w.incrNextTransition(Tp/2);
           w.setTransmissionHalf(2);
           break;
 
@@ -109,7 +96,7 @@ void newTransition(Wheel& w) {
           secondHalfTransition(w);
 
           if (w.getCurrentDataBit() >= w.getAvailDataBits() - 1) {  // last data bit, short transition time
-            w.incrNextTransition(25);
+            w.incrNextTransition(Tp/2);
 
             // exit data transmission
             if (w.getAvailDataBits() < 9) {
@@ -122,11 +109,11 @@ void newTransition(Wheel& w) {
             w.setCurrentDataBit(100);
 
           } else if (w.getSerialData(w.getCurrentDataBit()) ^ w.getSerialData(w.getCurrentDataBit() + 1)) {  // xor: if current bit diff to next, next transition occurs later.
-            w.incrNextTransition(50);
+            w.incrNextTransition(Tp);
             w.setTransmissionHalf(2); // skip ahead to 2nd half transition of next bit, 50us later
 
           } else {  // adjacent bits have same value, short transition
-            w.incrNextTransition(25);
+            w.incrNextTransition(Tp/2);
             w.setTransmissionHalf(1); // move to 1st half of next bit, 25us later.
           }
 
@@ -137,16 +124,16 @@ void newTransition(Wheel& w) {
 
     case 3:  // Pause 2
       GPIO.out_w1tc = w.getPin2();
-      w.incrNextTransition(25);
+      w.incrNextTransition(Tp/2);
       w.setZone(100);
       break;
 
     case 100:  // Transition out of NULL zone
       w.setZone(0);
-      w.incrNextTransition( w.getPeriod() / 2 - (w.getAvailDataBits() * Tp + (1.5 * Tp)) ); // remaining time in period, after pulse, pause, and transmission of available bits
+      w.incrNextTransition( w.getPeriod()/2 - (w.getAvailDataBits()*Tp + (1.5*Tp)) ); // remaining time in period, after pulse, pause, and transmission of available bits
 
       if (w.getAvailDataBits() >= 9) {    // NB!! Investigate this
-        w.incrNextTransition(Tp / 2); // add pause 2 if wheel period is large enough (all bits are available)
+        w.incrNextTransition(Tp/2); // add pause 2 if wheel period is large enough (all bits are available)
       }
 
       break;
