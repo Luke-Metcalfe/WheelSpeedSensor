@@ -65,11 +65,13 @@ void setup() {
 }
 
 void loop() {
-  
+
 }
 
 
 void updatePulse(Wheel& w) {
+
+  Serial.println("Updating pulse.");
   currentWheelData[0] = pulse;     // insert large pulse
   currentWheelData[1] = pause1;    // insert pause 1
   for (int i = 2; i <= 10; i++) {  // insert serial data
