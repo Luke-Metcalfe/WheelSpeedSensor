@@ -1,9 +1,12 @@
 //——————————————————————————————————————————————————————————————————————————————
-//  ACAN2517FD Demo in loopback mode, for ESP32
+//  CAN Receive for WSS, with LEDC (IDF methods) integrated so far.
 //——————————————————————————————————————————————————————————————————————————————
 
 #include <ACAN2517FD.h>
 #include <SPI.h>
+
+#include "driver/ledc.h"
+#include "hal/ledc_types.h"
 
 //——————————————————————————————————————————————————————————————————————————————
 //  For using SPI on ESP32, see demo sketch SPI_Multiple_Buses
@@ -27,6 +30,7 @@ float wheelCirc = 1950.0;
 
 long inputID = 0x33;
 tFrameFormat format = kExtended;  // kStandard | kExtended
+
 // If Standard, address is limited up to 0x3F4
 long boxID;
 long responseID;
@@ -42,19 +46,49 @@ static const byte MCP2517_INT = 32;  // INT output of MCP2517FD // 32
 
 int LED21 = 21;
 
+// ---------------------------- CONSTANTS FOR PWM
+// The max duty cycle value based on PWM resolution (will be 255 if resolution is 8 bits)
+const int PWM_RESOLUTION = 13;  // ESP32 can go up to 16 bits. If changed, must also update timer_config.duty_resolution !!
+const int MAX_DUTY_CYCLE = (int)(pow(2, PWM_RESOLUTION) - 1);
+const int MAX_HIGH_POINT = (int)(pow(2, PWM_RESOLUTION) - 1);
+
+ledc_timer_config_t timer_config = {
+  .speed_mode = LEDC_LOW_SPEED_MODE,
+  .duty_resolution = LEDC_TIMER_13_BIT, // Duty resolution in bits
+  .timer_num = LEDC_TIMER_0, // Initial value
+  .freq_hz = 1000,  // Initial value. 0 does not work here, channel will be turned off by updatePWM() later.
+  .clk_cfg = LEDC_AUTO_CLK
+};
+
+ledc_channel_config_t channel_config = {
+  .gpio_num = GPIO_NUM_0, // Initial value
+  .speed_mode = LEDC_LOW_SPEED_MODE,
+  .channel = LEDC_CHANNEL_0,  // Initial value
+  .intr_type = LEDC_INTR_DISABLE,
+  .timer_sel = LEDC_TIMER_0, // Initial value
+  .duty = MAX_DUTY_CYCLE/2,  // Set duty to 50%
+  .hpoint = MAX_HIGH_POINT
+};
+
 //——————————————————————————————————————————————————————————————————————————————
 //  Wheel Structures
 //——————————————————————————————————————————————————————————————————————————————
 
 typedef struct {
-  //gpio_num_t pin1;
-  //gpio_num_t pin2;
+  //gpio_num_t pin1;  // WSS Data
+  //gpio_num_t pin2;  // WSS Pulse
+  gpio_num_t pin3;  // WSS Frequency
+
   float wheelSpeed;    // Wheel speed in kph
   float toothFreq;     // Frequency in Hz of sensor gear
   float pulsePeriod;   // Period between start pulses -> Double the tooth freq, since we send a pulse on each gear tooth transition
   int availDataBits;   // Number of data bits that will be able to be transmitted between pulse periods
   uint8_t sensorType;  // 0:Normal | 1:Directional
   uint8_t serialData[9];
+
+  ledc_channel_t ledc_chan;
+  ledc_timer_t ledc_timer;
+
   //rmt_channel_handle_t data_chan;
   //rmt_channel_handle_t pulse_chan;
 } Wheel;
@@ -62,9 +96,13 @@ typedef struct {
 Wheel FL = {
   //.pin1 = GPIO_NUM_4,
   //.pin2 = GPIO_NUM_15,
+  .pin3 = GPIO_NUM_33,
   .wheelSpeed = 101.0,
   .sensorType = 0,
   .serialData = { 1, 1, 0, 1, 1, 0, 1, 0, 1 },
+
+  .ledc_chan = LEDC_CHANNEL_0,
+  .ledc_timer = LEDC_TIMER_0,
   //.data_chan = NULL,
   //.pulse_chan = NULL,
 };
@@ -72,9 +110,15 @@ Wheel FL = {
 Wheel FR = {
   //.pin1 = GPIO_NUM_5,
   //.pin2 = GPIO_NUM_19,
+  .pin3 = GPIO_NUM_25,
+
   .wheelSpeed = 102.0,
   .sensorType = 0,
   .serialData = { 1, 1, 0, 1, 1, 0, 1, 0, 1 },
+
+  .ledc_chan = LEDC_CHANNEL_2,
+  .ledc_timer = LEDC_TIMER_1,
+
   //.data_chan = NULL,
   //.pulse_chan = NULL,
 };
@@ -82,9 +126,15 @@ Wheel FR = {
 Wheel RL = {
   //.pin1 = GPIO_NUM_0,
   //.pin2 = GPIO_NUM_17,
+  .pin3 = GPIO_NUM_26,
+
   .wheelSpeed = 103.0,
   .sensorType = 0,
   .serialData = { 1, 1, 0, 1, 1, 0, 1, 0, 1 },
+
+  .ledc_chan = LEDC_CHANNEL_4,
+  .ledc_timer = LEDC_TIMER_2,
+
   //.data_chan = NULL,
   //.pulse_chan = NULL,
 };
@@ -92,9 +142,15 @@ Wheel RL = {
 Wheel RR = {
   //.pin1 = GPIO_NUM_2,
   //.pin2 = GPIO_NUM_18,
+  .pin3 = GPIO_NUM_27,
+
   .wheelSpeed = 104.0,
   .sensorType = 0,
   .serialData = { 1, 1, 0, 1, 1, 0, 1, 0, 1 },
+
+  .ledc_chan = LEDC_CHANNEL_6,
+  .ledc_timer = LEDC_TIMER_3,
+
   //.data_chan = NULL,
   //.pulse_chan = NULL,
 };
@@ -108,9 +164,96 @@ Wheel* wheelArray[4] = { &FL, &FR, &RL, &RR };  // array of pointers to wheel ob
 ACAN2517FD can(MCP2517_CS, SPI, MCP2517_INT);
 
 //——————————————————————————————————————————————————————————————————————————————
+//   SETUP
+//——————————————————————————————————————————————————————————————————————————————
+
+void setup() {
+  //--- Switch on builtin led
+  pinMode(LED21, OUTPUT);
+  digitalWrite(LED21, HIGH);
+  //--- Start serial
+  Serial.begin(115200);
+  //--- Wait for serial (blink led at 10 Hz during waiting)
+  while (!Serial) {
+    delay(50);
+    digitalWrite(LED21, !digitalRead(LED21));
+  }
+
+  Serial.println("Starting CAN Setup.");
+  //----------------------------------- Begin SPI
+  SPI.begin(MCP2517_SCK, MCP2517_MISO, MCP2517_MOSI);
+
+  //--- Configure ACAN2517FD
+  ACAN2517FDSettings settings(ACAN2517FDSettings::OSC_4MHz10xPLL, 1000 * 1000, DataBitRateFactor::x1);
+  // oscillator frequency, desired arbitration bit rate, data bit rate factor (MBps)
+
+  //----------------------------------- Append CAN filters
+  buildAddresses(); // Create Filter and Response addresses based on Initial Configuration
+
+  ACAN2517FDFilters filters;
+  filters.appendFrameFilter(format, boxID, filterGeneral);        // Filter #0: receive standard frame with identifier 0x123
+  filters.appendFrameFilter(format, filterID_1, filterSpeedHz);   // Filter #1: receive standard frame with identifier 0x123
+  filters.appendFrameFilter(format, filterID_2, filterSpeedKph);  // Filter #2: receive standard frame with identifier 0x123
+
+  // Check if filters are okay.
+  if (filters.filterStatus() != ACAN2517FDFilters::kFiltersOk) {
+    Serial.print("Error filter ");
+    Serial.print(filters.filterErrorIndex());
+    Serial.print(": ");
+    Serial.println(filters.filterStatus());
+  } else {
+    Serial.println("Filters okay.");
+  }
+
+  //------------------------------------- Begin CAN
+  const uint32_t errorCode = can.begin( settings, [] { can.isr(); }, filters);
+  // NB!! adding "filters" here is the main difference.
+
+  Serial.println("Finished CAN Setup.");
+  Serial.print("Error code: 0x");
+  Serial.println(errorCode, HEX);
+
+  //----------------------------------- Initialise Wheel Speeds
+  for (int i = 0; i < 4; i++) {
+    setSpeed(100.0, wheelArray[i]);
+  }
+
+  // -------------------- Config LEDC Timers, Config LEDC Channels, Bind Channel to Timer
+  for (int i = 0; i < 4; i++) {
+
+    // Update Timer Config Object
+    timer_config.timer_num = wheelArray[i]->ledc_timer;
+    // Install Timer
+    ledc_timer_config(&timer_config);
+
+    // Update Channel Config Object
+    channel_config.channel = wheelArray[i]->ledc_chan;
+    channel_config.timer_sel = wheelArray[i]->ledc_timer;
+    channel_config.gpio_num = wheelArray[i]->pin3;
+    // Install Channel
+    ledc_channel_config(&channel_config);
+
+    // Bind channel to timer
+    ledc_bind_channel_timer(LEDC_LOW_SPEED_MODE, wheelArray[i]->ledc_chan, wheelArray[i]->ledc_timer);
+  }
+  updatePWM();
+
+}
+
+
+//——————————————————————————————————————————————————————————————————————————————
+//   LOOP
+//——————————————————————————————————————————————————————————————————————————————
+
+void loop() {
+  can.dispatchReceivedMessage();
+}
+
+//——————————————————————————————————————————————————————————————————————————————
 //   RECEIVE FILTERS
 //——————————————————————————————————————————————————————————————————————————————
 
+// --------------------Filter0
 void filterGeneral(const CANFDMessage& inMessage) {
   Serial.println("Match filter 0");
   Serial.print("Byte1: ");
@@ -137,7 +280,7 @@ void filterGeneral(const CANFDMessage& inMessage) {
     case 0x10:  // CONFIGURE SENSOR TYPE
       valuesOK = configSensorType(inMessage);
       for (int i = 0; i < 4; i++) {
-        response.data[i + 1] = wheelArray[i]->sensorType; // configure bytes 1-3
+        response.data[i + 1] = wheelArray[i]->sensorType;  // configure bytes 1-3
       }
       break;
 
@@ -146,7 +289,7 @@ void filterGeneral(const CANFDMessage& inMessage) {
 
     case 0x30:  // READ SENSOR TYPE
       for (int i = 0; i < 4; i++) {
-        response.data[i + 1] = wheelArray[i]->sensorType; // configure bytes 1-3
+        response.data[i + 1] = wheelArray[i]->sensorType;  // configure bytes 1-3
       }
       break;
 
@@ -157,7 +300,7 @@ void filterGeneral(const CANFDMessage& inMessage) {
       break;
 
     case 0x3F:  // READ SOFTWARE VERSION
-      
+
       break;
 
     case 0xF1:  // EXTRA FUNCTION ADDED BY HEIMHOLDT
@@ -187,13 +330,14 @@ void filterGeneral(const CANFDMessage& inMessage) {
   }
 
   // Send response frame
-    const bool responseOK = can.tryToSend(response);
+  const bool responseOK = can.tryToSend(response);
   if (responseOK) {
     Serial.print("Sent Response with identifier: ");
     Serial.println(response.data[0], HEX);
   }
 }
 
+// --------------------Filter1
 void filterSpeedHz(const CANFDMessage& inMessage) {
   Serial.println("Match filter 1");
 
@@ -204,14 +348,10 @@ void filterSpeedHz(const CANFDMessage& inMessage) {
     WheelValuesHz[i] = WheelValues[i] / 10.0;
     setFrequency(WheelValuesHz[i], wheelArray[i]);
   }
-  /*
-  Serial.println(WheelValuesHz[0]);
-  Serial.println(WheelValuesHz[1]);
-  Serial.println(WheelValuesHz[2]);
-  Serial.println(WheelValuesHz[3]);
-  */
+  updatePWM();
 }
 
+// --------------------Filter2
 void filterSpeedKph(const CANFDMessage& inMessage) {
   Serial.println("Match filter 2");
 
@@ -222,126 +362,11 @@ void filterSpeedKph(const CANFDMessage& inMessage) {
     WheelValuesKPH[i] = WheelValues[i] / 10.0;
     setSpeed(WheelValuesKPH[i], wheelArray[i]);
   }
-
-  /*
-  for (int i = 0; i < 4; i++) {
-    Serial.println(wheelArray[i]->sensorType);
-    Serial.println(wheelArray[i]->wheelSpeed);
-    Serial.println(wheelArray[i]->pulsePeriod);
-  }
-  */
+  updatePWM();
 }
 
 //——————————————————————————————————————————————————————————————————————————————
-//   SETUP
-//——————————————————————————————————————————————————————————————————————————————
-
-void setup() {
-  //--- Switch on builtin led
-  pinMode(LED21, OUTPUT);
-  digitalWrite(LED21, HIGH);
-  //--- Start serial
-  Serial.begin(115200);
-  //--- Wait for serial (blink led at 10 Hz during waiting)
-  while (!Serial) {
-    delay(50);
-    digitalWrite(LED21, !digitalRead(LED21));
-  }
-
-  Serial.println("Starting CAN Setup.");
-  //----------------------------------- Begin SPI
-  SPI.begin(MCP2517_SCK, MCP2517_MISO, MCP2517_MOSI);
-
-  //--- Configure ACAN2517FD
-  ACAN2517FDSettings settings(ACAN2517FDSettings::OSC_4MHz10xPLL, 1000 * 1000, DataBitRateFactor::x1);
-
-  //----------------------------------- Append CAN filters
-  buildAddresses();
-
-  ACAN2517FDFilters filters;
-  filters.appendFrameFilter(format, boxID, filterGeneral);        // Filter #0: receive standard frame with identifier 0x123
-  filters.appendFrameFilter(format, filterID_1, filterSpeedHz);   // Filter #1: receive standard frame with identifier 0x123
-  filters.appendFrameFilter(format, filterID_2, filterSpeedKph);  // Filter #2: receive standard frame with identifier 0x123
-
-  if (filters.filterStatus() != ACAN2517FDFilters::kFiltersOk) {
-    Serial.print("Error filter ");
-    Serial.print(filters.filterErrorIndex());
-    Serial.print(": ");
-    Serial.println(filters.filterStatus());
-  } else {
-    Serial.println("Filters okay.");
-  }
-
-  //------------------------------------- Begin CAN
-  const uint32_t errorCode = can.begin(
-    settings, [] {
-      can.isr();
-    },
-    filters);
-  // NB!! adding "filters" here is the main difference.
-
-  Serial.println("Finished CAN Setup.");
-  Serial.print("Error code: 0x");
-  Serial.println(errorCode, HEX);
-
-  //----------------------------------- Setup Wheel Speeds
-  for (int i = 0; i < 4; i++) {
-    setSpeed(100.0, wheelArray[i]);
-  }
-}
-
-
-//——————————————————————————————————————————————————————————————————————————————
-//   LOOP
-//——————————————————————————————————————————————————————————————————————————————
-
-void loop() {
-  can.dispatchReceivedMessage();
-}
-
-
-//——————————————————————————————————————————————————————————————————————————————
-//   DATA FORMAT FUNCTIONS
-//——————————————————————————————————————————————————————————————————————————————
-void buildAddresses() {
-  if (format == kStandard) {
-    boxID = inputID * 0x10;
-  } else if (format == kExtended) {
-    boxID = inputID * 0x100000 + 0x10000000;
-  }
-  responseID = boxID + 0x1;
-  filterID_1 = boxID + 0x2;
-  filterID_2 = boxID + 0x4;
-
-  //Serial.println(boxID, HEX);
-  //Serial.println(responseID, HEX);
-  //Serial.println(filterID_1, HEX);
-  //Serial.println(filterID_2, HEX);
-}
-
-int16_t convertFromTwosComp(uint16_t value) {
-  if (value & 0x8000) {  // if neg, subtract 2^16
-    return value - 0x10000;
-  } else {  // else do nothing.
-    return value;
-  }
-}
-
-int16_t* extractWordsAndConvert(const CANFDMessage& inMessage) {
-  // Extract 4x Words (16-bit) from CAN message, each word corresponding to one wheel.
-  // Convert from 16-bit two's complement to signed int
-  // Message structure explained in documentation.
-  static int16_t valueArray[4];
-
-  for (int i = 0; i < 4; i++) {
-    valueArray[i] = convertFromTwosComp((inMessage.data[2 * i] << 8) | inMessage.data[2 * i + 1]);
-  }
-
-  return valueArray;
-}
-
-//——————————————————————————————————————————————————————————————————————————————
-//   CAN FUNCTIONS
+//   FILTER CALLBACK FUNCTIONS
 //——————————————————————————————————————————————————————————————————————————————
 
 bool configSensorType(const CANFDMessage& inMessage) {
@@ -363,6 +388,39 @@ void configWheelInfo(const CANFDMessage& inMessage) {
   teeth = inMessage.data[1];
   wheelCirc = inMessage.data[2];
   // STILL TO COMPLETE THIS FUNCTION
+}
+
+//——————————————————————————————————————————————————————————————————————————————
+//   DATA FORMAT FUNCTIONS
+//——————————————————————————————————————————————————————————————————————————————
+void buildAddresses() {
+  if (format == kStandard) {
+    boxID = inputID * 0x10;
+  } else if (format == kExtended) {
+    boxID = inputID * 0x100000 + 0x10000000;
+  }
+  responseID = boxID + 0x1;
+  filterID_1 = boxID + 0x2;
+  filterID_2 = boxID + 0x4;
+}
+
+int16_t convertFromTwosComp(uint16_t value) {
+  if (value & 0x8000) {  // if neg, subtract 2^16
+    return value - 0x10000;
+  } else {  // else do nothing.
+    return value;
+  }
+}
+
+int16_t* extractWordsAndConvert(const CANFDMessage& inMessage) {
+  // Extract 4x Words (16-bit) from CAN message, each word corresponding to one wheel.
+  // Convert from 16-bit two's complement to signed int
+  // Message structure explained in documentation.
+  static int16_t valueArray[4];
+  for (int i = 0; i < 4; i++) {
+    valueArray[i] = convertFromTwosComp((inMessage.data[2 * i] << 8) | inMessage.data[2 * i + 1]);
+  }
+  return valueArray;
 }
 
 //——————————————————————————————————————————————————————————————————————————————
@@ -451,4 +509,23 @@ uint8_t* splitIntoBytes(uint16_t input) {
   byteArray[0] = (input >> 8) & 0xFF;  // Upper 8 bits (MSB)
   byteArray[1] = input & 0xFF;         // Lower 8 bits (LSB)
   return byteArray;
+}
+
+//——————————————————————————————————————————————————————————————————————————————
+//   UPDATE WAVEFORM FUNCTIONS
+//——————————————————————————————————————————————————————————————————————————————
+
+void updatePWM() {
+
+  for (int i = 0; i < 4; i++) {
+    //ledcWrite(wheelArray[i]->pin3, MAX_DUTY_CYCLE/2);
+    int freqInt = int(trunc(wheelArray[i]->toothFreq));  // truncate float to int. Only have resolution of 1Hz.
+
+    if (freqInt == 0) {
+      ledc_stop(LEDC_LOW_SPEED_MODE, wheelArray[i]->ledc_chan, 0);
+    } else {
+      ledc_update_duty(LEDC_LOW_SPEED_MODE, wheelArray[i]->ledc_chan);  // Resume after ledc_stop(). Does nothing otherwise.
+      ledc_set_freq(LEDC_LOW_SPEED_MODE, wheelArray[i]->ledc_timer, freqInt);
+    }
+  }
 }
