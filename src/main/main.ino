@@ -16,7 +16,7 @@
 #include "driver/rmt_tx.h"
 #include "driver/rmt_encoder.h"
 
-#define WSS_RESOLUTION_HZ 1000000  // 1MHz resolution, 1 tick = 1us
+
 
 //——————————————————————————————————————————————————————————————————————————————
 // Wheel Speed Sensor Definitions
@@ -33,7 +33,7 @@ long inputID = 0x33;
 tFrameFormat format = kExtended;  // kStandard | kExtended
 
 // If Standard, address is limited up to 0x3F4
-long boxID;       // CAN ID of Box, to be formatted correctly
+long boxID; // CAN ID of Box, to be formatted correctly
 long responseID;  // ID at which Box will respond
 long filterID_1;  // Filter for changing speed in Hz
 long filterID_2;  // Filter for changing speed in Kph
@@ -67,19 +67,19 @@ const int MAX_HIGH_POINT = (int)(pow(2, PWM_RESOLUTION) - 1);
 
 ledc_timer_config_t timer_config = {
   .speed_mode = LEDC_LOW_SPEED_MODE,
-  .duty_resolution = LEDC_TIMER_13_BIT,  // Duty resolution in bits
-  .timer_num = LEDC_TIMER_0,             // Initial value
-  .freq_hz = 1000,                       // Initial value. 0 does not work here, channel will be turned off by updatePWM() later.
+  .duty_resolution = LEDC_TIMER_13_BIT, // Duty resolution in bits
+  .timer_num = LEDC_TIMER_0, // Initial value
+  .freq_hz = 1000,  // Initial value. 0 does not work here, channel will be turned off by updatePWM() later.
   .clk_cfg = LEDC_AUTO_CLK
 };
 
 ledc_channel_config_t channel_config = {
-  .gpio_num = GPIO_NUM_0,  // Initial value
+  .gpio_num = GPIO_NUM_0, // Initial value
   .speed_mode = LEDC_LOW_SPEED_MODE,
   .channel = LEDC_CHANNEL_0,  // Initial value
   .intr_type = LEDC_INTR_DISABLE,
-  .timer_sel = LEDC_TIMER_0,   // Initial value
-  .duty = MAX_DUTY_CYCLE / 2,  // Set duty to 50%
+  .timer_sel = LEDC_TIMER_0, // Initial value
+  .duty = MAX_DUTY_CYCLE/2,  // Set duty to 50%
   .hpoint = MAX_HIGH_POINT
 };
 
@@ -99,8 +99,8 @@ typedef struct {
   uint8_t sensorType;  // 0:Normal | 1:Directional
   uint8_t serialData[9];
 
-  ledc_channel_t ledc_chan;  // LEDC channel (for PWM out)
-  ledc_timer_t ledc_timer;   // Timer for LEDC channel
+  ledc_channel_t ledc_chan; // LEDC channel (for PWM out)
+  ledc_timer_t ledc_timer;  // Timer for LEDC channel
 
   rmt_channel_handle_t data_chan;
   rmt_channel_handle_t pulse_chan;
@@ -173,45 +173,6 @@ Wheel RR = {
 Wheel* wheelArray[4] = { &FL, &FR, &RL, &RR };  // array of pointers to wheel objects
 
 //——————————————————————————————————————————————————————————————————————————————
-//  RMT Symbol Units
-//——————————————————————————————————————————————————————————————————————————————
-
-static const rmt_symbol_word_t wss_zero = {
-  .duration0 = 25 * WSS_RESOLUTION_HZ / 1000000,
-  .level0 = 1,
-  .duration1 = 25 * WSS_RESOLUTION_HZ / 1000000,
-  .level1 = 0,
-};
-
-static const rmt_symbol_word_t wss_one = {
-  .duration0 = 25 * WSS_RESOLUTION_HZ / 1000000,
-  .level0 = 0,
-  .duration1 = 25 * WSS_RESOLUTION_HZ / 1000000,
-  .level1 = 1,
-};
-
-static const rmt_symbol_word_t wss_pulse = {
-  .duration0 = 25 * WSS_RESOLUTION_HZ / 1000000,
-  .level0 = 1,
-  .duration1 = 25 * WSS_RESOLUTION_HZ / 1000000,
-  .level1 = 1,
-};
-
-static const rmt_symbol_word_t wss_pause1 = {
-  .duration0 = 12 * WSS_RESOLUTION_HZ / 1000000,
-  .level0 = 0,
-  .duration1 = 13 * WSS_RESOLUTION_HZ / 1000000,
-  .level1 = 0,
-};
-
-static const rmt_symbol_word_t wss_pause2 = {
-  .duration0 = 12 * WSS_RESOLUTION_HZ / 1000000,
-  .level0 = 0,
-  .duration1 = 13 * WSS_RESOLUTION_HZ / 1000000,
-  .level1 = 0,
-};
-
-//——————————————————————————————————————————————————————————————————————————————
 // ----------------------------------- SETUP -----------------------------------
 //——————————————————————————————————————————————————————————————————————————————
 
@@ -236,7 +197,7 @@ void setup() {
   // oscillator frequency, desired arbitration bit rate, data bit rate factor (MBps)
 
   //----------------------------------- Append CAN filters
-  buildAddresses();  // Create Filter and Response addresses based on Initial Configuration
+  buildAddresses(); // Create Filter and Response addresses based on Initial Configuration
 
   ACAN2517FDFilters filters;
   filters.appendFrameFilter(format, boxID, filterGeneral);        // Filter #0: receive standard frame with identifier 0x123
@@ -254,11 +215,7 @@ void setup() {
   }
 
   //------------------------------------- Begin CAN
-  const uint32_t errorCode = can.begin(
-    settings, [] {
-      can.isr();
-    },
-    filters);
+  const uint32_t errorCode = can.begin( settings, [] { can.isr(); }, filters);
   // NB!! adding "filters" here is the main difference.
 
   Serial.println("Finished CAN Setup.");
@@ -290,91 +247,6 @@ void setup() {
   }
   updatePWM();  // Update PWM output based on current Wheel Speed values
 
-  //——————————————————————————————————————————————————————————————————————————————
-  //   RMT Setup
-  //——————————————————————————————————————————————————————————————————————————————
-
-  // -------------------- Create RMT Tx Channels
-  for (int i = 0; i < 4; i++) {
-
-    rmt_tx_channel_config_t tx_chan_config_data = {
-      .gpio_num = wheelArray[i]->pin1,
-      .clk_src = RMT_CLK_SRC_DEFAULT,  // select source clock
-      .resolution_hz = WSS_RESOLUTION_HZ,
-      .mem_block_symbols = 64,  // increase the block size can make the LED less flickering
-      .trans_queue_depth = 4,  // set the number of transactions that can be pending in the background
-    };
-    ESP_ERROR_CHECK(rmt_new_tx_channel(&tx_chan_config_data, &wheelArray[i]->data_chan));
-
-    rmt_tx_channel_config_t tx_chan_config_pulse = {
-      .gpio_num = wheelArray[i]->pin2,
-      .clk_src = RMT_CLK_SRC_DEFAULT,  // select source clock
-      .resolution_hz = WSS_RESOLUTION_HZ,
-      .mem_block_symbols = 64,  // increase the block size can make the LED less flickering
-      .trans_queue_depth = 4,  // set the number of transactions that can be pending in the background
-    };
-    ESP_ERROR_CHECK(rmt_new_tx_channel(&tx_chan_config_pulse, &wheelArray[i]->pulse_chan));
-  }
-
-  // -------------------- Create Encoders
-  rmt_encoder_handle_t data_encoder_handle_array[4] = { NULL };
-  rmt_encoder_handle_t pulse_encoder_handle_array[4] = { NULL };
-  // Could put this in the Wheel struct instead
-
-  // -------------------- Create DATA callback-based encoder
-  // Have to define an encoder for each channel, as the .arg is passed when defined, not during runtime.
-  for (int i = 0; i < 4; i++) {
-    rmt_simple_encoder_config_t data_encoder_cfg = {
-      .callback = data_encoder_callback,
-      .arg = wheelArray[i],  // pass the Wheel object as an argument into the encoder
-      //Note we don't set min_chunk_size here as the default of 64 is good enough.
-    };
-    ESP_ERROR_CHECK(rmt_new_simple_encoder(&data_encoder_cfg, &data_encoder_handle_array[i]));
-  }
-
-  // -------------------- Create PULSE callback-based encoder
-  for (int i = 0; i < 4; i++) {
-    rmt_simple_encoder_config_t pulse_encoder_cfg = {
-      .callback = pulse_encoder_callback,
-      .arg = wheelArray[i],  // pass the Wheel object as an argument into the encoder
-      //Note we don't set min_chunk_size here as the default of 64 is good enough.
-    };
-    ESP_ERROR_CHECK(rmt_new_simple_encoder(&pulse_encoder_cfg, &pulse_encoder_handle_array[i]));
-  }
-
-  // -------------------- Enable RMT Tx Channels - 4xDATA + 4xPULSE
-  for (int i = 0; i < 4; i++) {
-    ESP_ERROR_CHECK(rmt_enable(wheelArray[i]->data_chan));
-    ESP_ERROR_CHECK(rmt_enable(wheelArray[i]->pulse_chan));
-  }
-
-  // -------------------- Transmission DONE Callback - NB! STILL TO COMPLETE
-  /*
-bool trans_done_callback() {
-  ESP_LOGI(TAG, "Pulse Done Callback!!");
-}
-
-rmt_tx_event_callbacks_t callback_config = {
-  .on_trans_done = trans_done_callback,
-};
-ESP_ERROR_CHECK(rmt_tx_register_event_callbacks(wheelArray[i]->pulse_chan, &callback_config));
-*/
-
-  // -------------------- Transmission Config
-  // Can reuse this for all channels, since they all run in looping config
-  rmt_transmit_config_t tx_config = {
-    .loop_count = -1,  // loop
-  };
-
-  // -------------------- Start Transmission
-  for (int i = 0; i < 4; i++) {
-    //data_encoder_cfg.arg = wheelArray[i];
-    ESP_ERROR_CHECK(rmt_transmit(wheelArray[i]->data_chan, data_encoder_handle_array[i], wheelArray[i]->serialData, (wheelArray[i]->availDataBits + 4) * 4, &tx_config));
-
-    //pulse_encoder_cfg.arg = wheelArray[i];
-    ESP_ERROR_CHECK(rmt_transmit(wheelArray[i]->pulse_chan, pulse_encoder_handle_array[i], wheelArray[i]->serialData, 2 * 4, &tx_config));
-  }
-  //ESP_ERROR_CHECK(rmt_tx_wait_all_done(wss_chan, portMAX_DELAY));
 }
 
 //——————————————————————————————————————————————————————————————————————————————
@@ -573,7 +445,7 @@ int16_t* extractWordsAndConvert(const CANFDMessage& inMessage) {
 }
 
 uint8_t* splitWordIntoBytes(uint16_t input) {
-  // Split 16-bit int into 2x 8-bit ints: 0b1111111100000000 => 0b11111111, 0b00000000
+  // Split 16-bit int into 2x 8-bit ints: 0b1111111100000000 => 0b11111111, 0b00000000 
   static uint8_t byteArray[2];
   byteArray[0] = (input >> 8) & 0xFF;  // Upper 8 bits (MSB)
   byteArray[1] = input & 0xFF;         // Lower 8 bits (LSB)
@@ -650,91 +522,10 @@ void setFrequency(float new_freq, Wheel* w) {
 }
 
 //——————————————————————————————————————————————————————————————————————————————
-//   RMT Encoder Functions
+//   CAN Response Functions
 //——————————————————————————————————————————————————————————————————————————————
 
-static size_t pulse_encoder_callback(const void* data, size_t data_size,
-                                     size_t symbols_written, size_t symbols_free,
-                                     rmt_symbol_word_t* symbols, bool* done, void* arg) {
 
-  if (symbols_written < 1) {
-    symbols[0] = wss_pulse;
-    return 1;
-  } else {
-    Wheel* wheelPtr = (Wheel*)arg;
-    float period = wheelPtr->pulsePeriod;
-    float rem = period / 2 - Tp;
-
-    rmt_symbol_word_t wss_rem = {
-      .level0 = 0,
-      .duration0 = rem / 2.0 * WSS_RESOLUTION_HZ / 1000000,
-      .level1 = 0,
-      .duration1 = rem / 2.0 * WSS_RESOLUTION_HZ / 1000000,
-    };
-
-    symbols[0] = wss_rem;
-    *done = 1;  //Indicate end of the transaction.
-    return 1;
-  }
-}
-
-
-static size_t data_encoder_callback(const void* data, size_t data_size,
-                                    size_t symbols_written, size_t symbols_free,
-                                    rmt_symbol_word_t* symbols, bool* done, void* arg) {
-
-  int* data_int = (int*)data;
-  Wheel* wheelPtr = (Wheel*)arg;
-  int availDataBits = wheelPtr->availDataBits;
-
-  if (symbols_free < 8) {
-    return 0;
-  }
-
-  if (symbols_written < data_size / 4 - 1) {
-    size_t symbol_pos = 0;
-
-    switch (symbols_written) {
-      case 0:
-        symbols[symbol_pos++] = wss_pulse;
-        break;
-
-      case 1:
-        symbols[symbol_pos++] = wss_pause1;
-        break;
-
-      default:
-        if (symbols_written >= availDataBits + 2) {
-          symbols[symbol_pos++] = wss_pause2;
-        }
-
-        if (symbols_written - 2 < availDataBits) {
-          if (data_int[symbols_written - 2] == 1) {
-            symbols[symbol_pos++] = wss_one;
-          } else {
-            symbols[symbol_pos++] = wss_zero;
-          }
-        }
-        break;
-    }
-    return symbol_pos;
-  } else {
-
-    float period = wheelPtr->pulsePeriod;
-    float rem = period / 2 - (availDataBits * Tp + 2 * Tp);  // pulse + p1 + p2 = 2*Tp
-
-    rmt_symbol_word_t wss_rem = {
-      .level0 = 0,
-      .duration0 = rem / 2.0 * WSS_RESOLUTION_HZ / 1000000,
-      .level1 = 0,
-      .duration1 = rem / 2.0 * WSS_RESOLUTION_HZ / 1000000,
-    };
-
-    symbols[0] = wss_rem;
-    *done = 1;  //Indicate end of the transaction.
-    return 1;
-  }
-}
 
 //——————————————————————————————————————————————————————————————————————————————
 //   Update Waveform Functions
