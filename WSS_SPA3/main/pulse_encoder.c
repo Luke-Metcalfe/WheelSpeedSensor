@@ -8,7 +8,7 @@
 #include "pulse_encoder.h"
 #include "driver/gpio.h"
 
-#define SIG_RESOLUTION_HZ 1000000 // 1MHz resolution, 1 tick = 1us 
+#define WSS_RESOLUTION_HZ 1000000 // 1MHz resolution, 1 tick = 1us 
 
 int _Tp = 50;  // microseconds
 
@@ -38,7 +38,7 @@ static size_t rmt_encode_pulse(rmt_encoder_t *encoder, rmt_channel_handle_t chan
         case 0: // send remainder
             encoded_symbols += copy_encoder->encode(copy_encoder, channel, &pulse_encoder->pulse_rem,
                                                     sizeof(rmt_symbol_word_t), &session_state);
-            ESP_LOGI(TAG, "Case 3: Encoded Remainder, %d symbols!", encoded_symbols);
+            ESP_LOGI(TAG, "Complete");
             if (session_state & RMT_ENCODING_COMPLETE) {
                 pulse_encoder->state = RMT_ENCODING_RESET; // back to the initial encoding session
                 state |= RMT_ENCODING_COMPLETE;
@@ -87,14 +87,14 @@ esp_err_t rmt_new_pulse_encoder(const pulse_encoder_config_t *config, rmt_encode
     
     // construct the various symbols in RMT symbol format
     float rem = config->period - _Tp;
-    ESP_LOGI(TAG, "Period: %f ; Tp: %d ; Remainder: %f", config->period, _Tp, rem);
+    //ESP_LOGI(TAG, "Period: %f ; Tp: %d ; Remainder: %f", config->period, _Tp, rem);
 
     // Configure last RMT symbol with variable duration to make up remainder of pulsePeriod
     pulse_encoder->pulse_rem = (rmt_symbol_word_t) {
         .level0 = 1,
-        .duration0 = 50 * SIG_RESOLUTION_HZ / 1000000,
+        .duration0 = 50 * WSS_RESOLUTION_HZ / 1000000,
         .level1 = 0,
-        .duration1 = rem * SIG_RESOLUTION_HZ / 1000000,
+        .duration1 = rem * WSS_RESOLUTION_HZ / 1000000,
     };
 
     *ret_encoder = &pulse_encoder->base;

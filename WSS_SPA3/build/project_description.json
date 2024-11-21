@@ -1,7 +1,7 @@
 {
     "version":            "1.1",
     "project_name":       "WSS_V3",
-    "project_version":    "c3898da",
+    "project_version":    "35929e7-dirty",
     "project_path":       "C:/Users/LMETCALF/OneDrive - Volvo Cars/Desktop/WSS/WheelSpeedSensor/WSS_SPA3",
     "idf_path":           "C:/Users/LMETCALF/esp/v5.1.5/esp-idf",
     "build_dir":          "C:/Users/LMETCALF/OneDrive - Volvo Cars/Desktop/WSS/WheelSpeedSensor/WSS_SPA3/build",
